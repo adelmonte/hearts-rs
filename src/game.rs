@@ -298,9 +298,8 @@ impl Game {
     pub fn play(&mut self, c: u8) -> Played {
         let p = self.turn;
         self.hands[p].retain(|&x| x != c);
-        let lead = self.lead_suit().unwrap_or(suit(c));
         self.trick.push((p, c));
-        self.mem.record(c, p, lead);
+        self.mem.record(c);
         if suit(c) == HEARTS || (c == QUEEN_SPADES && self.rules.queen_breaks_hearts) {
             self.hearts_broken = true;
         }

@@ -162,7 +162,7 @@ impl Window {
         let surface = compositor.create_surface(&qh);
         let window = xdg.create_window(surface, WindowDecorations::RequestServer, &qh);
         window.set_title(title);
-        window.set_app_id("solitaire-rs");
+        window.set_app_id("hearts-rs");
         window.set_min_size(Some((240, 180)));
 
         let (viewport, frac) = bind_fractional(&globals, &qh, window.wl_surface());
@@ -234,11 +234,6 @@ impl Window {
         self.w = w;
         self.h = h;
         changed
-    }
-
-    pub fn set_title(&self, t: &str) -> Res<()> {
-        self.st.window.set_title(t);
-        Ok(())
     }
 
     pub fn toggle_fullscreen(&mut self) -> Res<()> {
@@ -417,7 +412,7 @@ impl Dispatch2<wl_keyboard::WlKeyboard, State> for Kb {
                     let mut diags: Vec<kbvm::xkb::diagnostic::Diagnostic> = Vec::new();
                     match ctx.keymap_from_bytes(&mut diags, None, &buf) {
                         Ok(map) => st.keymap = Some(map.to_builder().build_lookup_table()),
-                        Err(e) => eprintln!("solitaire-rs: cannot parse keymap: {e}"),
+                        Err(e) => eprintln!("hearts-rs: cannot parse keymap: {e}"),
                     }
                 }
             }
@@ -679,22 +674,20 @@ impl ProvidesRegistryState for State {
 smithay_client_toolkit::delegate_dispatch2!(State);
 
 pub mod keys {
-    pub const BACKSPACE: u32 = 0xff08;
-    pub const TAB: u32 = 0xff09;
     pub const RETURN: u32 = 0xff0d;
     pub const ESCAPE: u32 = 0xff1b;
-    pub const PAGE_UP: u32 = 0xff55;
-    pub const PAGE_DOWN: u32 = 0xff56;
+    pub const HOME: u32 = 0xff50;
+    pub const LEFT: u32 = 0xff51;
+    pub const RIGHT: u32 = 0xff53;
+    pub const END: u32 = 0xff57;
     pub const MENU: u32 = 0xff67;
     pub const KP_ENTER: u32 = 0xff8d;
     pub const KP_ADD: u32 = 0xffab;
     pub const KP_SUB: u32 = 0xffad;
     pub const KP_0: u32 = 0xffb0;
-    pub const KP_9: u32 = 0xffb9;
     pub const F1: u32 = 0xffbe;
     pub const F2: u32 = 0xffbf;
-    pub const F5: u32 = 0xffc2;
     pub const F10: u32 = 0xffc7;
     pub const F11: u32 = 0xffc8;
-    pub const ISO_LEFT_TAB: u32 = 0xfe20;
+    pub const SPACE: u32 = 0x20;
 }

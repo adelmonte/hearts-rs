@@ -112,7 +112,7 @@ pub struct Svg {
     tree: usvg::Tree,
 }
 
-const USE_PREFIX: &str = "solitaire-rs-use-";
+const USE_PREFIX: &str = "hearts-rs-use-";
 
 impl Svg {
     /// Parse `data` (SVG or SVGZ). Some decks keep their cards inside

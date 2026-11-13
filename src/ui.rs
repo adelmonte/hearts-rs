@@ -14,18 +14,21 @@ pub const GRAY: u32 = 0xff808080;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Cmd {
-    NewDeal,
-    NumberedDeal,
-    Restart,
+    NewGame,
     Undo,
     Redo,
     Hint,
     Demo,
-    Draw,
-    Drop,
-    DrawMode(bool),
-    ToggleAutodrop,
-    ToggleSolver,
+    ScoreSheet,
+    Statistics,
+    ResetStats,
+    Difficulty(u8),
+    Speed(u8),
+    EndScore(i32),
+    ToggleQueenBreaks,
+    ToggleExactReset,
+    ToggleMoonProtection,
+    ToggleFullPolish,
     ToggleStatus,
     Deck(usize),
     Theme(usize),
@@ -335,76 +338,153 @@ fn arrow(fb: &mut Image, x: i32, y: i32, s: i32, c: u32, clip: Rect) {
     }
 }
 
-/// A Win95 dialog: title bar plus lines of text; `input` adds a text field.
-/// A tab in a line starts a second column shared by all lines.
+/// A Win95 dialog: title bar, lines of text and an optional OK button.
+/// Tabs split a line into columns shared by all lines; in a `table` the
+/// columns after the first are right-aligned.
 pub struct Dialog {
     pub title: String,
     pub lines: Vec<String>,
-    pub input: Option<String>,
+    pub table: bool,
+    pub button: Option<&'static str>,
 }
 
 impl Dialog {
+    pub fn new(title: &str, lines: Vec<String>) -> Dialog {
+        Dialog {
+            title: title.into(),
+            lines,
+            table: false,
+            button: Some("OK"),
+        }
+    }
+
+    fn columns(&self, s: i32) -> Vec<i32> {
+        let mut w: Vec<i32> = Vec::new();
+        for l in &self.lines {
+            if !l.contains('\t') {
+                continue;
+            }
+            for (i, cell) in l.split('\t').enumerate() {
+                let cw = text_width(cell, s);
+                if i >= w.len() {
+                    w.push(cw);
+                } else {
+                    w[i] = w[i].max(cw);
+                }
+            }
+        }
+        w
+    }
+
+    fn gap(&self, s: i32) -> i32 {
+        if self.table { 16 * s } else { 12 * s }
+    }
+
     pub fn rect(&self, s: i32, view: Rect) -> Rect {
         let mut w = text_width_bold(&self.title, s) + 40 * s;
-        let col = self.column(s);
+        let cols = self.columns(s);
+        let table_w: i32 = cols.iter().sum::<i32>() + self.gap(s) * (cols.len() as i32 - 1).max(0);
         for l in &self.lines {
-            let lw = match l.split_once('\t') {
-                Some((_, b)) => col + text_width(b, s),
-                None => text_width(l, s),
-            };
+            let lw = if l.contains('\t') { table_w } else { text_width(l, s) };
             w = w.max(lw + 24 * s);
         }
         w = w.max(160 * s);
         let h = 22 * s
             + self.lines.len() as i32 * font::HEIGHT * s
-            + if self.input.is_some() { 23 * s } else { 0 }
+            + if self.button.is_some() { 31 * s } else { 0 }
             + 8 * s;
         Rect::new(view.x + (view.w - w) / 2, view.y + (view.h - h) / 2, w, h)
     }
 
-    fn column(&self, s: i32) -> i32 {
-        self.lines
-            .iter()
-            .filter_map(|l| l.split_once('\t'))
-            .map(|(a, _)| text_width(a, s) + 12 * s)
-            .max()
-            .unwrap_or(0)
+    pub fn button_rect(&self, s: i32, view: Rect) -> Option<Rect> {
+        let label = self.button?;
+        let r = self.rect(s, view);
+        let w = (text_width(label, s) + 24 * s).max(75 * s);
+        let h = 23 * s;
+        Some(Rect::new(r.x + (r.w - w) / 2, r.bottom() - h - 9 * s, w, h))
     }
 
     pub fn draw(&self, fb: &mut Image, s: i32, view: Rect, clip: Rect) {
         let r = self.rect(s, view);
-        let col = self.column(s);
+        let cols = self.columns(s);
         fb.fill(r.intersect(&clip), FACE);
         fb.bevel(r, s, true);
         let title = Rect::new(r.x + 3 * s, r.y + 3 * s, r.w - 6 * s, 14 * s);
         fb.fill(title.intersect(&clip), NAVY);
-        fb.text_bold(
-            &self.title,
-            title.x + 3 * s,
-            title.y,
-            s,
-            WHITE,
-            clip,
-        );
+        fb.text_bold(&self.title, title.x + 3 * s, title.y, s, WHITE, clip);
         let mut y = r.y + 22 * s;
         for l in &self.lines {
-            match l.split_once('\t') {
-                Some((a, b)) => {
-                    fb.text(a, r.x + 12 * s, y, s, BLACK, clip);
-                    fb.text(b, r.x + 12 * s + col, y, s, BLACK, clip);
+            if l.contains('\t') {
+                let mut x = r.x + 12 * s;
+                for (i, cell) in l.split('\t').enumerate() {
+                    let cw = cols.get(i).copied().unwrap_or(0);
+                    let tx = if self.table && i > 0 {
+                        x + cw - text_width(cell, s)
+                    } else {
+                        x
+                    };
+                    fb.text(cell, tx, y, s, BLACK, clip);
+                    x += cw + self.gap(s);
                 }
-                None => fb.text(l, r.x + 12 * s, y, s, BLACK, clip),
+            } else if l == "---" {
+                let yy = y + font::HEIGHT * s / 2;
+                fb.fill(Rect::new(r.x + 10 * s, yy, r.w - 20 * s, s).intersect(&clip), GRAY);
+                fb.fill(Rect::new(r.x + 10 * s, yy + s, r.w - 20 * s, s).intersect(&clip), WHITE);
+            } else {
+                fb.text(l, r.x + 12 * s, y, s, BLACK, clip);
             }
             y += font::HEIGHT * s;
         }
-        if let Some(t) = &self.input {
-            let f = Rect::new(r.x + 12 * s, y + 2 * s, r.w - 24 * s, 16 * s);
-            fb.fill(f.intersect(&clip), WHITE);
-            fb.bevel(f, s, false);
-            fb.text(t, f.x + 4 * s, f.y + s, s, BLACK, clip);
-            let cx = f.x + 4 * s + text_width(t, s);
-            fb.fill(Rect::new(cx, f.y + 3 * s, s, 11 * s).intersect(&clip), BLACK);
+        if let (Some(label), Some(b)) = (self.button, self.button_rect(s, view)) {
+            button(fb, b, s, label, true, false, true, clip);
         }
+    }
+}
+
+/// A Windows 95 push button.
+#[allow(clippy::too_many_arguments)]
+pub fn button(
+    fb: &mut Image,
+    r: Rect,
+    s: i32,
+    label: &str,
+    enabled: bool,
+    pressed: bool,
+    default: bool,
+    clip: Rect,
+) {
+    fb.fill(r.intersect(&clip), FACE);
+    let mut inner = r;
+    if default {
+        // The default button has an extra black frame.
+        for e in [
+            Rect::new(r.x, r.y, r.w, s),
+            Rect::new(r.x, r.bottom() - s, r.w, s),
+            Rect::new(r.x, r.y, s, r.h),
+            Rect::new(r.right() - s, r.y, s, r.h),
+        ] {
+            fb.fill(e.intersect(&clip), BLACK);
+        }
+        inner = r.inflate(-s);
+    }
+    if pressed {
+        for e in [
+            Rect::new(inner.x, inner.y, inner.w, s),
+            Rect::new(inner.x, inner.y, s, inner.h),
+        ] {
+            fb.fill(e.intersect(&clip), GRAY);
+        }
+    } else {
+        fb.bevel(inner, s, true);
+    }
+    let off = if pressed { s } else { 0 };
+    let tx = r.x + (r.w - text_width(label, s)) / 2 + off;
+    let ty = r.y + (r.h - font::HEIGHT * s) / 2 + off;
+    if enabled {
+        fb.text(label, tx, ty, s, BLACK, clip);
+    } else {
+        fb.text(label, tx + s, ty + s, s, WHITE, clip);
+        fb.text(label, tx, ty, s, GRAY, clip);
     }
 }
 

@@ -241,6 +241,18 @@ impl Image {
         out
     }
 
+    /// The image turned a quarter clockwise.
+    pub fn rotated(&self) -> Image {
+        let (w, h) = (self.w as usize, self.h as usize);
+        let mut px = vec![0; w * h];
+        for y in 0..h {
+            for x in 0..w {
+                px[x * h + (h - 1 - y)] = self.px[y * w + x];
+            }
+        }
+        Image::from_pixels(self.h, self.w, px)
+    }
+
     /// Draw `s` with the top of the font cell at `y`.
     pub fn text(&mut self, s: &str, x: i32, y: i32, scale: i32, color: u32, clip: Rect) {
         let clip = clip.intersect(&self.rect());

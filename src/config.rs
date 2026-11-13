@@ -1,6 +1,7 @@
 //! Tiny INI/.desktop reader and the persistent settings.
 
 use std::collections::BTreeMap;
+use crate::game::Rules;
 use std::path::{Path, PathBuf};
 
 pub type Ini = BTreeMap<String, BTreeMap<String, String>>;
@@ -73,70 +74,154 @@ pub fn data_dirs() -> Vec<PathBuf> {
     v
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct Stats {
+    pub played: u32,
+    pub won: u32,
+    pub total_score: i64,
+    pub best: Option<i32>,
+    pub moons: u32,
+}
+
 #[derive(Clone, Debug)]
 pub struct Settings {
     pub deck: String,
     pub theme: String,
     pub card_width: i32,
-    pub draw_one: bool,
-    pub autodrop: bool,
-    pub solver: bool,
     pub status_bar: bool,
+    pub difficulty: u8,
+    /// 0 fast, 1 normal, 2 slow.
+    pub speed: u8,
+    pub rules: Rules,
+    pub stats: Stats,
     pub win_w: i32,
     pub win_h: i32,
 }
 
-const GENERAL: &str = "General Settings";
+const GENERAL: &str = "General";
 
 impl Settings {
     fn path() -> PathBuf {
-        config_dir().join("solitaire-rsrc")
+        config_dir().join("hearts-rsrc")
     }
 
-    /// Our own rc file; on first run, seed it from KPat's kpatrc so the
-    /// chosen deck, background and card size carry over.
+    /// Our own rc file; on first run, seed it from qt-hearts' settings so
+    /// the deck, difficulty, rules and statistics carry over.
     pub fn load() -> Settings {
         let mut s = Settings {
-            deck: "svg-oxygen-air".into(),
+            deck: crate::assets::BUILTIN.into(),
             theme: "greenblaze".into(),
             card_width: 0,
-            draw_one: true,
-            autodrop: true,
-            solver: true,
             status_bar: true,
+            difficulty: 1,
+            speed: 1,
+            rules: Rules::default(),
+            stats: Stats::default(),
             win_w: 0,
             win_h: 0,
         };
-        let ini = read_ini(&Self::path()).or_else(|| read_ini(&config_dir().join("kpatrc")));
-        let Some(ini) = ini else { return s };
-        let b = |k: &str, d: bool| get(&ini, GENERAL, k).map_or(d, |v| v == "true" || v == "1");
-        let i = |g: &str, k: &str| get(&ini, g, k).and_then(|v| v.parse::<i32>().ok());
-        if let Some(v) = get(&ini, GENERAL, "Cardname") {
-            s.deck = v.to_string();
+        if let Some(ini) = read_ini(&Self::path()) {
+            s.read(&ini);
+        } else if let Some(ini) = read_ini(&config_dir().join("Hearts/Hearts.conf")) {
+            s.read_qt(&ini);
         }
-        if let Some(v) = get(&ini, "KgTheme", "Theme") {
-            s.theme = theme_id(v);
-        }
-        s.card_width = i(GENERAL, "CardWidth").unwrap_or(0).max(0);
-        s.draw_one = b("KlondikeEasy", true);
-        s.autodrop = b("Autodrop", true);
-        s.solver = b("Solver", true);
-        s.status_bar = b("StatusBar", true);
-        s.win_w = i("Window", "Width").unwrap_or(0);
-        s.win_h = i("Window", "Height").unwrap_or(0);
         s
     }
 
+    fn read(&mut self, ini: &Ini) {
+        let b = |g: &str, k: &str, d: bool| get(ini, g, k).map_or(d, |v| v == "true" || v == "1");
+        let i = |g: &str, k: &str| get(ini, g, k).and_then(|v| v.parse::<i64>().ok());
+        if let Some(v) = get(ini, GENERAL, "Deck") {
+            self.deck = v.to_string();
+        }
+        if let Some(v) = get(ini, GENERAL, "Background") {
+            self.theme = v.to_string();
+        }
+        self.card_width = i(GENERAL, "CardWidth").unwrap_or(0).clamp(0, 2000) as i32;
+        self.status_bar = b(GENERAL, "StatusBar", true);
+        self.difficulty = i(GENERAL, "Difficulty").unwrap_or(1).clamp(0, 2) as u8;
+        self.speed = i(GENERAL, "Speed").unwrap_or(1).clamp(0, 2) as u8;
+        self.read_rules(ini, "Rules", "EndScore", "ExactReset", "QueenBreaksHearts", "MoonProtection", "FullPolish");
+        let st = "Statistics";
+        self.stats = Stats {
+            played: i(st, "Played").unwrap_or(0).max(0) as u32,
+            won: i(st, "Won").unwrap_or(0).max(0) as u32,
+            total_score: i(st, "TotalScore").unwrap_or(0),
+            best: i(st, "Best").map(|v| v as i32),
+            moons: i(st, "Moons").unwrap_or(0).max(0) as u32,
+        };
+        self.win_w = i("Window", "Width").unwrap_or(0) as i32;
+        self.win_h = i("Window", "Height").unwrap_or(0) as i32;
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn read_rules(&mut self, ini: &Ini, g: &str, end: &str, exact: &str, queen: &str, moon: &str, polish: &str) {
+        let b = |k: &str, d: bool| get(ini, g, k).map_or(d, |v| v == "true" || v == "1");
+        let end_score = get(ini, g, end)
+            .and_then(|v| v.parse::<i32>().ok())
+            .filter(|v| END_SCORES.contains(v))
+            .unwrap_or(100);
+        self.rules = Rules {
+            end_score,
+            exact_reset: b(exact, false),
+            queen_breaks_hearts: b(queen, true),
+            moon_protection: b(moon, false),
+            full_polish: b(polish, false),
+        };
+    }
+
+    /// qt-hearts' QSettings file (~/.config/Hearts/Hearts.conf).
+    fn read_qt(&mut self, ini: &Ini) {
+        let i = |g: &str, k: &str| get(ini, g, k).and_then(|v| v.parse::<i64>().ok());
+        if let Some(t) = get(ini, GENERAL, "theme").filter(|t| !t.is_empty()) {
+            // Either the deck directory or the SVG inside it.
+            let p = Path::new(t);
+            let dir = if p.extension().is_some_and(|e| e == "svg" || e == "svgz") {
+                p.parent().unwrap_or(p)
+            } else {
+                p
+            };
+            if let Some(n) = dir.file_name() {
+                self.deck = n.to_string_lossy().into_owned();
+            }
+        }
+        self.difficulty = i(GENERAL, "aiDifficulty").unwrap_or(1).clamp(0, 2) as u8;
+        self.speed = i(GENERAL, "gameSpeed").unwrap_or(1).clamp(0, 2) as u8;
+        self.read_rules(ini, "rules", "endScore", "exactResetTo50", "queenBreaksHearts", "moonProtection", "fullPolish");
+        let st = "stats";
+        self.stats = Stats {
+            played: i(st, "gamesPlayed").unwrap_or(0).max(0) as u32,
+            won: i(st, "gamesWon").unwrap_or(0).max(0) as u32,
+            total_score: i(st, "totalScore").unwrap_or(0),
+            best: i(st, "bestScore").filter(|&v| v != 999).map(|v| v as i32),
+            moons: i(st, "shootTheMoon").unwrap_or(0).max(0) as u32,
+        };
+    }
+
     pub fn save(&self) {
+        let r = &self.rules;
+        let st = &self.stats;
+        let best = st.best.map_or(String::new(), |b| format!("Best={b}\n"));
         let t = format!(
-            "[{GENERAL}]\nCardname={}\nCardWidth={}\nKlondikeEasy={}\nAutodrop={}\nSolver={}\nStatusBar={}\n\n[KgTheme]\nTheme={}\n\n[Window]\nWidth={}\nHeight={}\n",
+            "[{GENERAL}]\nDeck={}\nBackground={}\nCardWidth={}\nStatusBar={}\nDifficulty={}\nSpeed={}\n\n\
+             [Rules]\nEndScore={}\nExactReset={}\nQueenBreaksHearts={}\nMoonProtection={}\nFullPolish={}\n\n\
+             [Statistics]\nPlayed={}\nWon={}\nTotalScore={}\n{best}Moons={}\n\n\
+             [Window]\nWidth={}\nHeight={}\n",
             self.deck,
-            self.card_width,
-            self.draw_one,
-            self.autodrop,
-            self.solver,
-            self.status_bar,
             self.theme,
+            self.card_width,
+            self.status_bar,
+            self.difficulty,
+            self.speed,
+            r.end_score,
+            r.exact_reset,
+            r.queen_breaks_hearts,
+            r.moon_protection,
+            r.full_polish,
+            st.played,
+            st.won,
+            st.total_score,
+            st.moons,
             self.win_w,
             self.win_h
         );
@@ -149,9 +234,4 @@ impl Settings {
     }
 }
 
-/// KGameThemeProvider stores either a bare name or a path to the .desktop
-/// file; reduce both to the bare name.
-pub fn theme_id(v: &str) -> String {
-    let base = v.rsplit('/').next().unwrap_or(v);
-    base.strip_suffix(".desktop").unwrap_or(base).to_string()
-}
+pub const END_SCORES: [i32; 4] = [50, 75, 100, 150];

@@ -20,34 +20,23 @@ impl Difficulty {
             _ => Difficulty::Medium,
         }
     }
-    pub fn index(self) -> u8 {
-        self as u8
-    }
 }
 
 /// What everyone at the table has seen this hand.
 #[derive(Clone, Default)]
 pub struct Memory {
     played: u64,
-    /// Bit per suit for each player known to be out of it.
-    voids: [u8; NPLAYERS],
     pub queen_played: bool,
     suit_played: [u8; 4],
 }
 
 impl Memory {
-    pub fn record(&mut self, c: u8, player: usize, lead: u8) {
+    pub fn record(&mut self, c: u8) {
         self.played |= 1 << c;
         self.suit_played[suit(c) as usize] += 1;
         if c == QUEEN_SPADES {
             self.queen_played = true;
         }
-        if suit(c) != lead {
-            self.voids[player] |= 1 << lead;
-        }
-    }
-    pub fn is_void(&self, player: usize, s: u8) -> bool {
-        self.voids[player] >> s & 1 != 0
     }
     fn count_played(&self, s: u8) -> u8 {
         self.suit_played[s as usize]
