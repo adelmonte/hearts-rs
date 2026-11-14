@@ -1,0 +1,21 @@
+hearts-rs is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version. See COPYING.
+
+Game logic
+----------
+The rules, rule variants and computer players are ported from qt-hearts
+(https://github.com/adelmonte/qt-hearts), GPL-3.0. The window, drawing,
+card deck and theme code comes from solitaire-rs
+(https://github.com/adelmonte/solitaire-rs), GPL-3.0-or-later.
+
+Background
+----------
+assets/cleangreen.svg is the Clean Green theme from KPatience
+(https://apps.kde.org/kpat/), by Parker Coates.
+
+Font
+----
+The UI font is Adobe Helvetica from the X11 bitmap fonts. Its copyright and
+permission notice are in src/font.rs.
