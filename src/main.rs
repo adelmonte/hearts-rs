@@ -17,7 +17,7 @@ use ai::Difficulty;
 use assets::{Deck, Entry, Theme};
 use board::{Layout, Sprite, Target};
 use config::{END_SCORES, Settings};
-use game::{Game, NPLAYERS, Phase, Played, SOUTH};
+use game::{Game, NPLAYERS, Phase, SOUTH};
 use gfx::{Image, Rect, text_width_bold};
 use rain::{Rain, Rng};
 use std::sync::{Arc, mpsc};
@@ -563,7 +563,7 @@ impl App {
     fn play_card(&mut self, c: u8) {
         self.clear_hint();
         let broken = self.game.hearts_broken;
-        let r = self.game.play(c);
+        self.game.play(c);
         if self.focus.is_some() {
             let n = self.game.hands[SOUTH].len();
             self.focus = self.focus.map(|f| f.min(n.saturating_sub(1))).filter(|_| n > 0);
@@ -574,9 +574,7 @@ impl App {
         } else {
             self.set_status(String::new());
         }
-        match r {
-            Played::TrickFull | Played::Next => self.next_turn(),
-        }
+        self.next_turn();
     }
 
     fn human_play(&mut self, c: u8) {

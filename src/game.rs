@@ -161,11 +161,6 @@ pub struct Game {
     pub received: [Vec<u8>; NPLAYERS],
 }
 
-pub enum Played {
-    Next,
-    TrickFull,
-}
-
 impl Game {
     pub fn new(rules: Rules) -> Game {
         Game {
@@ -297,7 +292,7 @@ impl Game {
         }
     }
 
-    pub fn play(&mut self, c: u8) -> Played {
+    pub fn play(&mut self, c: u8) {
         let p = self.turn;
         self.hands[p].retain(|&x| x != c);
         self.trick.push((p, c));
@@ -305,11 +300,8 @@ impl Game {
         if suit(c) == HEARTS || (c == QUEEN_SPADES && self.rules.queen_breaks_hearts) {
             self.hearts_broken = true;
         }
-        if self.trick_full() {
-            Played::TrickFull
-        } else {
+        if !self.trick_full() {
             self.turn = (p + 1) % NPLAYERS;
-            Played::Next
         }
     }
 
@@ -432,7 +424,8 @@ mod tests {
             while g.phase == Phase::Playing {
                 let c = g.ai_play(diff, &mut rng);
                 assert!(g.valid(g.turn).contains(&c), "illegal {}", name(c));
-                if let Played::TrickFull = g.play(c) {
+                g.play(c);
+                if g.trick_full() {
                     g.collect();
                 }
             }
