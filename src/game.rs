@@ -290,7 +290,9 @@ impl Game {
         match self.lead_suit() {
             None if self.first_trick => "You must lead the two of clubs.",
             None => "Hearts have not been broken yet.",
-            Some(l) if suit(c) != l => "You must follow suit.",
+            Some(l) if self.hands[SOUTH].iter().any(|&x| suit(x) == l) && suit(c) != l => {
+                "You must follow suit."
+            }
             Some(_) => "You can't play points on the first trick.",
         }
     }

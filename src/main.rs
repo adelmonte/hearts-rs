@@ -132,6 +132,7 @@ struct App {
     ch: i32,
     bg: Image,
     bg_due: Option<Instant>,
+    cards_due: Option<Instant>,
     bg_gen: u64,
     bg_tx: mpsc::Sender<(u64, Image)>,
     bg_rx: mpsc::Receiver<(u64, Image)>,
@@ -145,6 +146,9 @@ struct App {
     focus: Option<usize>,
     hint: Option<u8>,
     sprites: [Sprite; 52],
+    /// Where each sprite last belonged: a hand (0-3), the trick (4) or
+    /// taken (5); a card changing hands moves above the rest.
+    owner: [u8; 52],
     lay: Layout,
 
     step: Step,
@@ -462,6 +466,24 @@ impl App {
         t
     }
 
+    fn owners(&self) -> [u8; 52] {
+        let mut o = [u8::MAX; 52];
+        for (p, hand) in self.game.hands.iter().enumerate() {
+            for &c in hand {
+                o[c as usize] = p as u8;
+            }
+        }
+        for &(_, c) in &self.game.trick {
+            o[c as usize] = 4;
+        }
+        for c in 0..52 {
+            if self.game.taken_by[c].is_some() {
+                o[c] = 5;
+            }
+        }
+        o
+    }
+
     fn zorder(&self) -> [i32; 52] {
         let mut z = [0; 52];
         for hand in &self.game.hands {
@@ -485,6 +507,7 @@ impl App {
         let now = Instant::now();
         let targets = self.targets();
         let z = self.zorder();
+        let owners = self.owners();
         let deal_order: [usize; 52] = {
             let mut o = [0; 52];
             for (p, hand) in self.game.hands.iter().enumerate() {
@@ -498,11 +521,11 @@ impl App {
         for (c, t) in targets.iter().enumerate() {
             let s = &mut self.sprites[c];
             s.z = z[c];
+            let changed_hands = owners[c] != self.owner[c] && owners[c] != 5;
+            self.owner[c] = owners[c];
             if s.same(t) && mode != Mode::Now {
                 continue;
             }
-            let into_trick = t.up && !t.gone && t.y != s.ty && z[c] >= 100;
-            let moved_hand = !t.gone && (s.side != t.side || s.up != t.up);
             let (ms, start) = match mode {
                 Mode::Now => (0.0, now),
                 Mode::Ms(ms) => (ms, now),
@@ -511,7 +534,7 @@ impl App {
                     now + Duration::from_millis((deal_order[c] as f32 * sp.deal) as u64),
                 ),
             };
-            s.go(t, ms, into_trick || moved_hand, start);
+            s.go(t, ms, changed_hands && mode != Mode::Deal, start);
         }
     }
 
@@ -548,7 +571,7 @@ impl App {
         self.sync(Mode::Ms(self.speed().mv));
         if !broken && self.game.hearts_broken {
             self.set_status("Hearts have been broken.".into());
-        } else if self.status.starts_with("Click") || self.status.contains("took") {
+        } else {
             self.set_status(String::new());
         }
         match r {
@@ -1457,12 +1480,10 @@ impl App {
         self.close_menu();
         self.bg_resized();
         self.snap();
-        if self.set.card_width == 0 {
-            let w = self.card_width_for_view();
-            if w != self.cw {
-                self.cw = w;
-                self.render_cards();
-            }
+        // Cards follow the window until you pick a size; re-render them
+        // once resizing settles.
+        if self.set.card_width == 0 && self.card_width_for_view() != self.cw {
+            self.cards_due = Some(Instant::now() + Duration::from_millis(120));
         }
         self.relayout();
         if self.rain.as_ref().is_some_and(|r| r.finished) {
@@ -1671,8 +1692,15 @@ impl App {
         if self.bg_due.is_some_and(|t| now >= t) {
             self.start_bg_job();
         }
+        if self.cards_due.is_some_and(|t| now >= t) {
+            self.cards_due = None;
+            if self.set.card_width == 0 {
+                let w = self.card_width_for_view();
+                self.set_card_width(w);
+            }
+        }
 
-        if !anim && self.step != Step::Wait && now >= self.next_step && self.menu.is_none() {
+        if !anim && self.step != Step::Wait && now >= self.next_step && !self.paused() {
             self.step();
         }
 
@@ -1695,6 +1723,15 @@ impl App {
         }
     }
 
+    /// Menus and dialogs (other than the end-of-hand sheet) hold the game.
+    fn paused(&self) -> bool {
+        self.menu.is_some()
+            || self
+                .dialog
+                .as_ref()
+                .is_some_and(|(k, _)| *k != DialogKind::HandOver)
+    }
+
     fn timeout_ms(&self) -> i32 {
         let busy = self.animating() || self.rain.as_ref().is_some_and(|r| !r.finished);
         if busy {
@@ -1710,8 +1747,11 @@ impl App {
         let mut t = i32::MAX;
         let mut due =
             |at: Instant| t = t.min(at.saturating_duration_since(now).as_millis() as i32 + 1);
-        if self.step != Step::Wait && self.menu.is_none() {
+        if self.step != Step::Wait && !self.paused() {
             due(self.next_step);
+        }
+        if let Some(c) = self.cards_due {
+            due(c);
         }
         if let Some(b) = self.bg_due {
             due(b);
@@ -1816,6 +1856,7 @@ fn main() {
         ch: 0,
         bg: Image::default(),
         bg_due: None,
+        cards_due: None,
         bg_gen: 0,
         bg_tx,
         bg_rx,
@@ -1827,6 +1868,7 @@ fn main() {
         focus: None,
         hint: None,
         sprites: [Sprite::default(); 52],
+        owner: [u8::MAX; 52],
         lay: Layout::default(),
         step: Step::Wait,
         next_step: Instant::now(),

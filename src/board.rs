@@ -270,3 +270,51 @@ impl Sprite {
         !(self.gone && self.anim.is_none())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn table_fits_and_nothing_collides() {
+        let label_h = 17;
+        for &(vw, vh) in &[(1000, 730), (800, 580), (1920, 1060), (1395, 1683), (640, 460), (2560, 1400)] {
+            for aspect in [71.0 / 96.0, 0.69, 0.75] {
+                let cw = fit_width(vw, vh, aspect, label_h);
+                let ch = (cw as f32 / aspect).round() as i32;
+                let l = Layout::new(vw, vh, cw, ch, label_h);
+                let view = Rect::new(0, 0, vw, vh);
+                let inside = |r: Rect| r.intersect(&view) == r;
+                let hand = |p: usize| {
+                    (0..13).fold(Rect::default(), |a, i| {
+                        let (x, mut y) = l.hand_pos(p, i, 13);
+                        if p == 0 {
+                            y -= l.raise();
+                        }
+                        let r = l.rect_at(x, y, Layout::sideways(p));
+                        let r = if p == 0 { r.union(&l.rect_at(x, y + l.raise(), false)) } else { r };
+                        a.union(&r)
+                    })
+                };
+                let trick = (0..4).fold(Rect::default(), |a, p| {
+                    let (x, y) = l.trick_pos(p);
+                    a.union(&l.rect_at(x, y, false))
+                });
+                let ctx = format!("{vw}x{vh} aspect {aspect} cw {cw}");
+                assert!(inside(trick), "{ctx}: trick {trick:?}");
+                for p in 0..4 {
+                    let h = hand(p);
+                    assert!(inside(h), "{ctx}: hand {p} {h:?}");
+                    assert!(h.intersect(&trick).is_empty(), "{ctx}: hand {p} {h:?} hits trick {trick:?}");
+                    let (lx, ly) = l.label_pos(p);
+                    let lr = Rect::new(lx - 40, ly, 80, label_h);
+                    assert!(inside(lr), "{ctx}: label {p} {lr:?}");
+                    assert!(lr.intersect(&trick).is_empty(), "{ctx}: label {p} hits trick");
+                    for q in 0..p {
+                        assert!(h.intersect(&hand(q)).is_empty(), "{ctx}: hands {p} {q} collide");
+                    }
+                }
+            }
+        }
+    }
+}
